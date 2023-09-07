@@ -3,7 +3,7 @@ library(shinythemes)
 
 ui <- fluidPage(
   theme=shinytheme('cosmo'),
-  titlePanel("Data Processing App"),
+  titlePanel("Fluvial Transport App"),
   sidebarLayout(
     sidebarPanel(
       # Explanatory text using HTML
