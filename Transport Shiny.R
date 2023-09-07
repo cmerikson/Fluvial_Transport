@@ -158,7 +158,7 @@ server <- function(input, output) {
     }
     distance(Movement)
     
-    Transport = Transport[,TotalDistance:=rowSums(Transport[,2:16],na.rm=T)]
+    Transport = Transport[,TotalDistance:=(do.call(pmax,c(Transport[,-1],na.rm=T)))]
     
     transport_data(Transport)
     
