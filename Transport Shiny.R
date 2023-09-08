@@ -1,5 +1,6 @@
 library(shiny)
 library(shinythemes)
+library(shinycssloaders)
 
 ui <- fluidPage(
   theme=shinytheme('cosmo'),
@@ -21,10 +22,10 @@ ui <- fluidPage(
     mainPanel(
       tabsetPanel(
         # Tab for displaying the output table
-        tabPanel("Output Table", tableOutput("table")),
+        tabPanel("Output Table", withSpinner(tableOutput("table"))),
         
         # Tab for displaying the plot
-        tabPanel("Plot", plotlyOutput("plot"))
+        tabPanel("Plot", withSpinner(plotlyOutput("plot")))
       )
     )
   )
@@ -35,6 +36,7 @@ server <- function(input, output) {
   plotly_obj <- reactiveVal(NULL)
   
   observeEvent(input$process_data, {
+    
     # Get user inputs
     folder_path <- input$folder_path
     crs_string <- input$crs
@@ -60,7 +62,7 @@ server <- function(input, output) {
     
     # Function to read files in a folder
     files = lapply(csv_files, fread)
-    Data = rbindlist(files)
+    Data = rbindlist(files,fill=T)
     
     # Include Excel files
     if (length(xlsx_files)>0) {
@@ -108,7 +110,7 @@ server <- function(input, output) {
     sf_Data = st_as_sf(Data,coords = c('Easting','Northing'),crs=crs_string)
     
     # Snap tracers to centerline
-    Data = Data[,Location:=(st_snap(sf_Data$geometry,centerline,2))]
+    Data = Data[,Location:=(st_snap(sf_Data$geometry,st_zm(centerline),2))]
     
     # Adjust table to output format
     adjust_table = function(data) {
@@ -174,6 +176,7 @@ server <- function(input, output) {
     plotly_obj(ggplotly(river_map, width = 800, height = 600))
     
   })
+  
   # For rendering a table, you can use:
   output$table <- renderTable({
     transport_data()
