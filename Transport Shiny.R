@@ -1,6 +1,14 @@
 library(shiny)
 library(shinythemes)
 library(shinycssloaders)
+library(data.table)
+library(tools)
+library(openxlsx)
+library(sf)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(viridis)
 
 ui <- fluidPage(
   theme=shinytheme('cosmo'),
@@ -12,10 +20,13 @@ ui <- fluidPage(
       <p>Store all data in one folder and enter the path to this folder. Do not include quotation marks in the path name.<p>
       <p>Files may be a combination of .csv or .xlsx. A .shp centerline must be included as well.<p>
       <p>Specify the CRS value used to record tracer locations and ensure it matches the projection of the stream centerline. The default in WGS84 UTM Zone 18N.</p>
-      <p> Dates must begin with MM/DD/YY format but may include further time specifications.<p>
       <p>After processing, results in the table can be downloaded.</p>"),
       textInput("folder_path", "Enter Folder Path:", value = ""),
       textInput("crs", "Enter CRS:", value = "32618"),
+      textInput("ID", "Enter ID Column", value= "Comment"),
+      textInput("X", "Enter X Coordinate Column", value="Easting"),
+      textInput("Y", "Enter Y Coordinate Column", value="Northing"),
+      textInput("Date", "Enter Date Column", value="GPSTime"),
       actionButton("process_data", "Process Data"),
       downloadButton("download_transport", "Download Transport Table")  # Add download button
     ),
@@ -40,15 +51,10 @@ server <- function(input, output) {
     # Get user inputs
     folder_path <- input$folder_path
     crs_string <- input$crs
-    
-    library(data.table)
-    library(tools)
-    library(openxlsx)
-    library(sf)
-    library(lubridate)
-    library(ggplot2)
-    library(plotly)
-    library(viridis)
+    id_column <- input$ID
+    x_column <- input$X
+    y_column <- input$Y
+    date_column <- input$Date
     
     # Function to list files in folder
     list_full = function(folder_path){
@@ -76,11 +82,12 @@ server <- function(input, output) {
     
     # Test formatting
     date_check = function(data) {
-      dates = as.character(data[,(substr(GPSTime,start=1,stop=8))])
-      pattern = "^\\d{2}/\\d{2}/\\d{2}$"
+      dates = as.character(substr(parse_date(data[,(strsplit(GPSTime,' '))]),start=1,stop=10))
+      pattern = "^\\d{4}-\\d{2}-\\d{2}$"
       results = ifelse(sapply(dates, grepl, pattern=pattern), 0, 1)
       if(c(1)%in%results){
-        stop("Error: At least one date is not in %m/%d/%y format.")}
+        stop("Error: Unable to interpret date format of at least one file.")}
+      data = data[,Date:=as.character(substr(parse_date(data[,(strsplit(GPSTime,' '))]),start=1,stop=10))]
     }
     
     date_check(Data)
@@ -89,25 +96,25 @@ server <- function(input, output) {
     centerline = read_sf(shapefiles[endsWith(shapefiles,'shp')])
     centerline = st_set_crs(centerline, crs_string)
     
+    # Avoid variable call issues
+    Data = Data[,ID:=get(id_column)]
+    
     # Clean Data
-    Data = Data[,c('GPSTime','Latitude','Longitude','Northing','Easting','Comment')]
+    Data = Data[,c('Date',..y_column,..x_column,'ID')]
     
     # Determine repeat observations
-    Data = Data[,count:=.N,by='Comment']
+    Data = Data[,count:=.N,by='ID']
     
     # Function to get Survey Dates from column with date and time
     survey_dates = function (table) {
-      surveys = list((strsplit(Data$GPSTime,' ')))
-      surveys = rbindlist(surveys)
-      surveys = transpose(surveys)
-      surveys <<- unique(surveys$V1)
+      surveys <<- unique(table$Date)
     }
     
     # Call survey date function
     survey_dates(Data)
     
     # Create sf object of Data
-    sf_Data = st_as_sf(Data,coords = c('Easting','Northing'),crs=crs_string)
+    sf_Data = st_as_sf(Data,coords = c(x_column,y_column),crs=crs_string)
     
     # Snap tracers to centerline
     Data = Data[,Location:=(st_snap(sf_Data$geometry,st_zm(centerline),2))]
@@ -115,13 +122,12 @@ server <- function(input, output) {
     # Adjust table to output format
     adjust_table = function(data) {
       Movement = copy(data)
-      Movement = Movement[,Date:=(substr(GPSTime,start=1,stop=8))]
-      Movement = Movement[,c('Comment','Date','Location','count')]
-      Movement = unique(Movement,by=c('Comment','Date'))
-      Movement = dcast(Movement,formula = Comment ~ Date, value.var = 'Location', fun.aggregate = NULL)
-      date_order = order(as.Date(surveys,format="%m/%d/%y"))
+      Movement = Movement[,c('ID','Date','Location','count')]
+      Movement = unique(Movement,by=c('ID','Date'))
+      Movement = dcast(Movement,formula = ID ~ Date, value.var = 'Location', fun.aggregate = NULL)
+      date_order = order(as.Date(surveys,format="%Y-%m-%d"))
       surveys = surveys[date_order]
-      setcolorder(Movement,c('Comment',surveys))
+      setcolorder(Movement,c('ID',surveys))
       Movement <<- Movement
     }
     
@@ -130,8 +136,8 @@ server <- function(input, output) {
     # Define a function to calculate distances
     distance <- function(data) {
       Transport <- data.table()
-      comment <- data[['Comment']]
-      data <- data[, !'Comment', with = FALSE]
+      comment <- data[['ID']]
+      data <- data[, !'ID', with = FALSE]
       data <- st_as_sf(data)
       
       num_cols <- ncol(data)
@@ -167,9 +173,9 @@ server <- function(input, output) {
     # Create the ggplot object
     river_map <- ggplot() +
       geom_sf(data = centerline) +
-      geom_sf(data = sf_Data, aes(color = as.character(year(as.Date(substr(GPSTime, start = 1, stop = 8), format = '%m/%d/%y'))))) +
+      geom_sf(data = sf_Data, aes(color = as.character(year(as.Date(Date))))) +
       scale_color_viridis(discrete = TRUE, option = "D") +
-      labs(x = 'Easting (m)', y = 'Northing (m)', color = 'Year') +
+      labs(x = 'Easting (m)', y = 'Northing (m)', color = 'Year',title = 'Tracer Locations') +
       theme_bw()+theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))
     
     # Convert ggplot to a Plotly plot
