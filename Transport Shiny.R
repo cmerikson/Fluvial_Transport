@@ -114,10 +114,32 @@ server <- function(input, output) {
     survey_dates(Data)
     
     # Create sf object of Data
-    sf_Data = st_as_sf(Data,coords = c(x_column,y_column),crs=crs_string)
+    sf_Data <<- st_as_sf(Data,coords = c(x_column,y_column),crs=crs_string)
     
     # Snap tracers to centerline
-    Data = Data[,Location:=(st_snap(sf_Data$geometry,st_zm(centerline),2))]
+    snap_point_to_line <- function(point, line) {
+      nearest_points <- st_nearest_points(point, line)
+      if (length(nearest_points) > 1) { 
+        length_test = function(points) {
+          line_lengths = st_length(points)
+        }
+        shortest = which.min((lapply(nearest_points, length_test)))
+        nearest_points = nearest_points[shortest]
+      }
+      nearest_points = st_cast(nearest_points,'POINT')[seq(2, 2, 2)]
+      nearest_points_coordinates = st_coordinates(nearest_points)
+      return(nearest_points_coordinates)
+    }
+    
+    snapped_points <- lapply(sf_Data$geometry, snap_point_to_line, line = st_zm(centerline))
+    
+    table = do.call(rbind,snapped_points)
+    table = as.data.table(table)
+    
+    table = st_as_sf(table,coords=c('X','Y'),crs=crs_string)
+    
+    # Add snapped_sf as a new column in the data.table
+    Data = Data[, Location:=table]
     
     # Adjust table to output format
     adjust_table = function(data) {
