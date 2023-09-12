@@ -1,0 +1,5 @@
+# Explanation of folder contents
+This folder contains Excel files, CSV files, and shapefiles that can be used as an example for the transport app. 
+Store all the files in one folder and enter the path to the folder (without "") into the app.
+
+These data are from Amethyst Brook in Pehlam, Massachusetts, a long-time field site for Dartmouth College fluvial research.
