@@ -9,6 +9,7 @@ library(lubridate)
 library(ggplot2)
 library(plotly)
 library(viridis)
+library(parsedate)
 
 ui <- fluidPage(
   theme=shinytheme('cosmo'),
