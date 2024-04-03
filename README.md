@@ -1,6 +1,6 @@
 # Fluvial Transport
 
-This app calculates the transport distance along a stream or other route.
+This app calculates the transport distance along a stream or other route. The main file is `Transport Shiny.R`; all other files are examples.
 It is designed for tracking RFID tracers across multiple survey dates.
 
 It works by assigning a location along the stream centerline for each tracer on each date. Then the distance between locations is calculated for each tracer between all dates. The scrpit relies on the `sf` and `sfnetworks` for spatial data hadnling and `data.table` for other data processing.
