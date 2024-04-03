@@ -10,6 +10,7 @@ library(ggplot2)
 library(plotly)
 library(viridis)
 library(parsedate)
+library(sfnetworks)
 
 ui <- fluidPage(
   theme=shinytheme('cosmo'),
@@ -20,8 +21,8 @@ ui <- fluidPage(
       HTML("<p>This app calculates the distance moved for each subsequent survey date and the total distance moved in meters.<p>
       <p>Store all data in one folder and enter the path to this folder. Do not include quotation marks in the path name.<p>
       <p>Files may be a combination of .csv or .xlsx. A .shp centerline must be included as well.<p>
-      <p>Specify the CRS value used to record tracer locations and ensure it matches the projection of the stream centerline. The default in WGS84 UTM Zone 18N.</p>
-      <p>After processing, results in the table can be downloaded.</p>"),
+      <p>Specify the coordinate reference system. The default in WGS84 UTM Zone 18N. Dates must be real.</p>
+      <p>After processing, results in the table can be downloaded. Processing times are long for many files.</p>"),
       textInput("folder_path", "Enter Folder Path:", value = ""),
       textInput("crs", "Enter CRS:", value = "32618"),
       textInput("ID", "Enter ID Column", value= "Comment"),
@@ -57,6 +58,9 @@ server <- function(input, output) {
     y_column <- input$Y
     date_column <- input$Date
     
+    # Ensure CRS is numeric value
+    crs_string = as.numeric(crs_string)
+    
     # Function to list files in folder
     list_full = function(folder_path){
       csv_files <<- list.files(folder_path, pattern='csv', full.names=T)
@@ -74,8 +78,10 @@ server <- function(input, output) {
     # Include Excel files
     if (length(xlsx_files)>0) {
       excel = lapply(xlsx_files, read.xlsx)
+      if(length(xlsx_files==1))
+        excel = do.call(rbind,excel)
       excel = setDT(excel)
-      if (typeof(excel) == 'list') {
+      if (length(xlsx_files)>1) {
         excel = rbindlist(excel)
         Data = rbind(Data,excel)
       }
@@ -95,7 +101,12 @@ server <- function(input, output) {
     
     # Read shapefile
     centerline = read_sf(shapefiles[endsWith(shapefiles,'shp')])
-    centerline = st_set_crs(centerline, crs_string)
+    if(nrow(centerline)>1){
+      if(st_geometry_type(centerline)!='LINESTRING'){print('A continuos centerline mustbe supplied. The current centerline is conposed of discontinous segments.')
+        stop()}
+      else{centerline = st_line_merge(line_sf$geometry)}
+    }
+    if(is.na(st_crs(centerline))){centerline = st_set_crs(centerline, crs_string)}
     
     # Avoid variable call issues
     Data = Data[,ID:=get(id_column)]
@@ -115,7 +126,9 @@ server <- function(input, output) {
     survey_dates(Data)
     
     # Create sf object of Data
+    Data = na.omit(Data)
     sf_Data <<- st_as_sf(Data,coords = c(x_column,y_column),crs=crs_string)
+    if(st_crs(centerline)!=st_crs(sf_Data)){centerline = st_transform(centerline,crs_string)}
     
     # Snap tracers to centerline
     snap_point_to_line <- function(point, line) {
@@ -132,10 +145,20 @@ server <- function(input, output) {
       return(nearest_points_coordinates)
     }
     
-    snapped_points <- lapply(sf_Data$geometry, snap_point_to_line, line = st_zm(centerline))
+    snapped_points = data.table()
+    for (i in seq_along(sf_Data$geometry)) {
+      point = try({
+        snap_point_to_line(sf_Data[i,'geometry'], line = st_zm(centerline))
+      }, silent = TRUE)
+      snapped_points = rbind(snapped_points,point)
+    }
     
-    table = do.call(rbind,snapped_points)
-    table = as.data.table(table)
+    # lapply no longer works with sf object
+    #snapped_points <- lapply(sf_Data$geometry, snap_point_to_line, line = st_zm(centerline))
+    
+    table = snapped_points
+    #table = do.call(rbind,snapped_points)
+    #table = as.data.table(table)
     
     table = st_as_sf(table,coords=c('X','Y'),crs=crs_string)
     
@@ -159,24 +182,37 @@ server <- function(input, output) {
     # Define a function to calculate distances
     distance <- function(data) {
       Transport <- data.table()
-      comment <- data[['ID']]
+      ID <- data[,"ID"]
       data <- data[, !'ID', with = FALSE]
-      data <- st_as_sf(data)
       
       num_cols <- ncol(data)
       
       for (i in 1:(num_cols - 1)) {
         for (j in (i + 1):num_cols) {
-          col1 <- data[[i]]
-          col2 <- data[[j]]
+          col1 <- st_as_sf(data[,..i])
+          col2 <- st_as_sf(data[,..j])
           new_col_name <- paste0(names(data)[i], "_", names(data)[j], "_Distance")
           
           # Initialize an empty vector to store distances
-          distances <- numeric(length(col1))
+          distances = data.table()
           
           # Calculate distances for all pairs of values in col1 and col2
-          for (k in 1:length(col1)) {
-            distances[k] <- ifelse(st_is_empty(col1[k]) | st_is_empty(col2[k]), NA_real_, st_distance(col1[k], col2[k]))
+          for (k in 1:nrow(col1)) {
+            
+            #Networking function
+            create_network = function(index){
+              network = as_sfnetwork(centerline, directed = FALSE)
+              point1 = st_as_sfc(col1[index,1])
+              point2 = st_as_sfc(col2[index,1])
+              suppressWarnings({network = st_network_blend(network,point1)
+              network = st_network_blend(network,point2)})
+              sublines = st_as_sf(activate(network,'edges'))
+              length = st_length(sublines[2,'geometry'])
+              return(length)
+            }
+            
+            row = ifelse(st_is_empty(col1[k,1]) | st_is_empty(col2[k,1]), NA_real_,create_network(k))
+            distances = rbind(distances,row)
           }
           
           # Add the distances to the Transport table
@@ -185,7 +221,7 @@ server <- function(input, output) {
       }
       
       # Combine comment and Transport into a single table
-      Transport <<- cbind(comment, Transport)
+      Transport <<- cbind(ID, Transport)
     }
     distance(Movement)
     
