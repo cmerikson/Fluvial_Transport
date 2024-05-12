@@ -21,7 +21,7 @@ ui <- fluidPage(
       HTML("<p>This app calculates the distance moved for each subsequent survey date and the total distance moved in meters.<p>
       <p>Store all data in one folder and enter the path to this folder. Do not include quotation marks in the path name.<p>
       <p>Files may be a combination of .csv or .xlsx. A .shp centerline must be included as well.<p>
-      <p>Specify the coordinate reference system. The default in WGS84 UTM Zone 18N. Dates must be real.</p>
+      <p>Specify the coordinate reference system. The default is WGS84 UTM Zone 18N. Dates must be real.</p>
       <p>After processing, results in the table can be downloaded. Processing times are long for many files.</p>"),
       textInput("folder_path", "Enter Folder Path:", value = ""),
       textInput("crs", "Enter CRS:", value = "32618"),
