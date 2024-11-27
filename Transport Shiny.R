@@ -102,7 +102,7 @@ server <- function(input, output) {
     # Read shapefile
     centerline = read_sf(shapefiles[endsWith(shapefiles,'shp')])
     if(nrow(centerline)>1){
-      if(st_geometry_type(centerline)!='LINESTRING'){print('A continuos centerline mustbe supplied. The current centerline is conposed of discontinous segments.')
+      if(st_geometry_type(centerline)!='LINESTRING'){print('A continuos centerline must be supplied. The current centerline is conposed of discontinous segments.')
         stop()}
       else{centerline = st_line_merge(line_sf$geometry)}
     }
@@ -153,13 +153,7 @@ server <- function(input, output) {
       snapped_points = rbind(snapped_points,point)
     }
     
-    # lapply no longer works with sf object
-    #snapped_points <- lapply(sf_Data$geometry, snap_point_to_line, line = st_zm(centerline))
-    
     table = snapped_points
-    #table = do.call(rbind,snapped_points)
-    #table = as.data.table(table)
-    
     table = st_as_sf(table,coords=c('X','Y'),crs=crs_string)
     
     # Add snapped_sf as a new column in the data.table
@@ -179,45 +173,46 @@ server <- function(input, output) {
     
     adjust_table(Data)
     
+    #Networking function
+    create_network = function(index, start, column){
+      network = as_sfnetwork(centerline, directed = FALSE)
+      point1 = st_as_sfc(start)
+      point2 = st_as_sfc(column[index,1])
+      suppressWarnings({network = st_network_blend(network,point1)
+      network = st_network_blend(network,point2)})
+      sublines = st_as_sf(activate(network,'edges'))
+      length = st_length(sublines[2,'geometry'])
+      return(length)
+    }
+    
+    # Define First point on the centerline to measure distances from
+    centertable = st_as_sfc(centerline)
+    coordinates = st_coordinates(centertable)
+    A = coordinates[1,1]
+    B = coordinates[1,2]
+    first_point = data.table(x=A, y=B)
+    first_point = st_as_sf(first_point, coords = c('x','y'), crs=crs_string)
+    
     # Define a function to calculate distances
-    distance <- function(data) {
-      Transport <- data.table()
-      ID <- data[,"ID"]
-      data <- data[, !'ID', with = FALSE]
+    distance = function(data) {
+      Transport = data.table()
+      ID = data[,"ID"]
+      data = data[, !'ID', with = FALSE]
       
-      num_cols <- ncol(data)
-      
-      for (i in 1:(num_cols - 1)) {
-        for (j in (i + 1):num_cols) {
-          col1 <- st_as_sf(data[,..i])
-          col2 <- st_as_sf(data[,..j])
-          new_col_name <- paste0(names(data)[i], "_", names(data)[j], "_Distance")
-          
-          # Initialize an empty vector to store distances
-          distances = data.table()
-          
-          # Calculate distances for all pairs of values in col1 and col2
-          for (k in 1:nrow(col1)) {
-            
-            #Networking function
-            create_network = function(index){
-              network = as_sfnetwork(centerline, directed = FALSE)
-              point1 = st_as_sfc(col1[index,1])
-              point2 = st_as_sfc(col2[index,1])
-              suppressWarnings({network = st_network_blend(network,point1)
-              network = st_network_blend(network,point2)})
-              sublines = st_as_sf(activate(network,'edges'))
-              length = st_length(sublines[2,'geometry'])
-              return(length)
-            }
-            
-            row = ifelse(st_is_empty(col1[k,1]) | st_is_empty(col2[k,1]), NA_real_,create_network(k))
-            distances = rbind(distances,row)
-          }
-          
-          # Add the distances to the Transport table
-          Transport[, (new_col_name) := distances]
+      for (i in 1:ncol(data)) {
+        col1 = st_as_sf(data[,..i])
+        new_col_name <- names(data)[i]
+        
+        # Initialize an empty vector to store distances
+        distances = data.table()
+        
+        for (j in 1:nrow(data)) {
+          row = ifelse(st_is_empty(col1[j,1]), NA_real_, create_network(j, first_point, col1))
+          distances = rbind(distances,row)
         }
+        
+        # Add the distances to the Transport table
+        Transport[, (new_col_name) := distances]
       }
       
       # Combine comment and Transport into a single table
@@ -225,7 +220,7 @@ server <- function(input, output) {
     }
     distance(Movement)
     
-    Transport = Transport[,TotalDistance:=(do.call(pmax,c(Transport[,-1],na.rm=T)))]
+    Transport[,TotalDistance:=do.call(pmax, c(.SD, na.rm=T)) - do.call(pmin, c(.SD, na.rm=T)), .SDcols = !("ID")]
     
     transport_data(Transport)
     
