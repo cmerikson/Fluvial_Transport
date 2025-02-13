@@ -66,6 +66,13 @@ server <- function(input, output) {
       csv_files <<- list.files(folder_path, pattern='csv', full.names=T)
       xlsx_files <<- list.files(folder_path, pattern='xlsx', full.names=T)
       shapefiles <<- list.files(folder_path, pattern='shp', full.names=T)
+      
+      if(length(shapefiles)<1){
+        stop("Error: There are no shape files in the folder. Check the folder path.")
+      }
+      if(length(csv_files) + length(xlsx_files) < 1){
+        stop("Error: There are no .csv or .xlsx files. Check the folder path.")
+      }
     }
     
     #Call function to list files
@@ -102,7 +109,7 @@ server <- function(input, output) {
     # Read shapefile
     centerline = read_sf(shapefiles[endsWith(shapefiles,'shp')])
     if(nrow(centerline)>1){
-      if(st_geometry_type(centerline)!='LINESTRING'){print('A continuos centerline must be supplied. The current centerline is conposed of discontinous segments.')
+      if(st_geometry_type(centerline)!='LINESTRING'){print('A continuous centerline must be supplied. The current centerline is conposed of discontinous segments.')
         stop()}
       else{centerline = st_line_merge(line_sf$geometry)}
     }
